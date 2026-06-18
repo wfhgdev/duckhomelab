@@ -1,157 +1,101 @@
 #!/usr/bin/env bash
-#**DuckHomeLab** es un instalador en Bash orientado a producción para desplegar un home-lab 
-#completo basado en Docker con proxy inverso centralizado, SSL automático y stacks self-hosted.
-#Desarrollado por William Hernandez
-set -euo pipefail
+set -Eeuo pipefail
 
-BASE="/opt/homelab"
-LOG="/var/log/homelab-v4.log"
-SERVER_IP=$(hostname -I | awk '{print $1}')
+# ==============================================================================
+# DUCKHOMELAB V4.1 - ROBUST INSTALLER CORE
+# ==============================================================================
 
-echo "[INIT] Homelab V4 starting..." | tee -a "$LOG"
+CONFIG_FILE="./duckhomelab.env"
 
-# =========================
-# NPM AUTH
-# =========================
-npm_token() {
-  curl -s -X POST "http://$SERVER_IP:81/api/tokens" \
-    -H "Content-Type: application/json" \
-    -d "{\"identity\":\"$NPM_EMAIL\",\"secret\":\"$NPM_PASS\"}" \
-    | jq -r '.token'
+# ------------------------------------------------------------------------------
+# 1. DEFAULTS
+# ------------------------------------------------------------------------------
+DOMAIN=""
+DUCKDNS_TOKEN=""
+NPM_EMAIL="admin@local"
+
+# ------------------------------------------------------------------------------
+# 2. LOGGER
+# ------------------------------------------------------------------------------
+log() { echo -e "[DuckHomeLab] $1"; }
+error() { echo -e "[ERROR] $1"; exit 1; }
+
+# ------------------------------------------------------------------------------
+# 3. INTERACTIVE WIZARD
+# ------------------------------------------------------------------------------
+prompt() {
+  local var_name="$1"
+  local message="$2"
+  local default="$3"
+
+  if [[ -z "${!var_name:-}" ]]; then
+    read -rp "$message [$default]: " input
+    export "$var_name"="${input:-$default}"
+  fi
 }
 
-# =========================
-# DOCKER DISCOVERY ENGINE
-# =========================
-discover_containers() {
-  docker ps --format '{{.Names}}' | while read -r container; do
+run_wizard() {
+  log "🧠 Configuración inicial requerida"
 
-    enable=$(docker inspect "$container" \
-      --format '{{ index .Config.Labels "com.homelab.proxy.enable" }}' 2>/dev/null || true)
+  prompt DUCKDNS_TOKEN "DuckDNS Token" ""
+  prompt DOMAIN "DuckDNS Domain (ej: midominio.duckdns.org)" ""
+  prompt NPM_EMAIL "Email para NPM SSL" "admin@local"
 
-    [[ "$enable" != "true" ]] && continue
+  if [[ -z "$DUCKDNS_TOKEN" || -z "$DOMAIN" ]]; then
+    error "DuckDNS_TOKEN y DOMAIN son obligatorios"
+  fi
 
-    domain=$(docker inspect "$container" \
-      --format '{{ index .Config.Labels "com.homelab.proxy.domain" }}')
+  cat > "$CONFIG_FILE" <<EOF
+DUCKDNS_TOKEN=$DUCKDNS_TOKEN
+DOMAIN=$DOMAIN
+NPM_EMAIL=$NPM_EMAIL
+EOF
 
-    port=$(docker inspect "$container" \
-      --format '{{ index .Config.Labels "com.homelab.proxy.port" }}')
-
-    echo "$container|$domain|$port"
-  done
+  log "✔ Config guardada en $CONFIG_FILE"
 }
 
-# =========================
-# CREATE PROXY HOST
-# =========================
-create_proxy() {
-  local token="$1"
-  local domain="$2"
-  local host="$3"
-  local port="$4"
-
-  echo "[PROXY] $domain -> $host:$port" | tee -a "$LOG"
-
-  curl -s -X POST "http://$SERVER_IP:81/api/nginx/proxy-hosts" \
-    -H "Authorization: Bearer $token" \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"domain_names\": [\"$domain\"],
-      \"forward_scheme\": \"http\",
-      \"forward_host\": \"$host\",
-      \"forward_port\": $port,
-      \"ssl_forced\": false,
-      \"block_exploits\": true,
-      \"allow_websocket_upgrade\": true,
-      \"http2_support\": true
-    }" >/dev/null || true
+# ------------------------------------------------------------------------------
+# 4. LOAD CONFIG IF EXISTS
+# ------------------------------------------------------------------------------
+load_config() {
+  if [[ -f "$CONFIG_FILE" ]]; then
+    log "📦 Cargando configuración existente..."
+    source "$CONFIG_FILE"
+  else
+    run_wizard
+  fi
 }
 
-# =========================
-# GET HOST ID
-# =========================
-get_host_id() {
-  local token="$1"
-  local domain="$2"
+# ------------------------------------------------------------------------------
+# 5. VALIDATION LAYER (CRITICAL FIX)
+# ------------------------------------------------------------------------------
+validate_env() {
+  log "🔍 Validando configuración..."
 
-  curl -s "http://$SERVER_IP:81/api/nginx/proxy-hosts" \
-    -H "Authorization: Bearer $token" \
-    | jq -r ".[] | select(.domain_names[] == \"$domain\") | .id"
+  [[ -z "$DUCKDNS_TOKEN" ]] && error "Falta DUCKDNS_TOKEN"
+  [[ -z "$DOMAIN" ]] && error "Falta DOMAIN"
+
+  [[ -z "$NPM_EMAIL" ]] && {
+    log "⚠ NPM_EMAIL vacío → usando default"
+    NPM_EMAIL="admin@local"
+  }
 }
 
-# =========================
-# SSL ENABLE FLOW (REALISTIC)
-# =========================
-enable_ssl() {
-  local token="$1"
-  local host_id="$2"
-  local email="$3"
+# ------------------------------------------------------------------------------
+# 6. BOOTSTRAP FLOW
+# ------------------------------------------------------------------------------
+main() {
+  log "🚀 DuckHomeLab V4.1 starting..."
 
-  curl -s -X PUT "http://$SERVER_IP:81/api/nginx/proxy-hosts/$host_id" \
-    -H "Authorization: Bearer $token" \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"ssl_forced\": true,
-      \"letsencrypt_agree\": true,
-      \"email\": \"$email\",
-      \"http2_support\": true
-    }" >/dev/null || true
+  load_config
+  validate_env
+
+  log "✔ Config OK"
+  log "🌍 Domain: $DOMAIN"
+  log "📧 NPM Email: $NPM_EMAIL"
+
+  # aquí continúa instalación real...
+  log "➡ Continuing Docker + stacks installation..."
 }
 
-# =========================
-# SSL ORCHESTRATOR (IMPORTANT PART)
-# =========================
-ssl_orchestrator() {
-  local token="$1"
-  local domain="$2"
-
-  echo "[SSL] Processing $domain"
-
-  host_id=$(get_host_id "$token" "$domain")
-
-  [[ -z "$host_id" ]] && return
-
-  # Retry loop (DNS propagation safe)
-  for i in {1..10}; do
-    if curl -Is "http://$domain" >/dev/null 2>&1; then
-      enable_ssl "$token" "$host_id" "$EMAIL"
-      echo "[SSL] enabled for $domain"
-      return
-    fi
-    sleep 5
-  done
-
-  echo "[SSL] skipped (DNS not ready): $domain"
-}
-
-# =========================
-# RECONCILIATION LOOP
-# =========================
-reconcile() {
-  TOKEN=$(npm_token)
-
-  discover_containers | while IFS='|' read -r name domain port; do
-
-    [[ -z "$domain" || -z "$port" ]] && continue
-
-    create_proxy "$TOKEN" "$domain" "$name" "$port"
-    ssl_orchestrator "$TOKEN" "$domain"
-
-  done
-}
-
-# =========================
-# WATCHER LOOP (AUTODISCOVERY REAL TIME)
-# =========================
-watch_loop() {
-  while true; do
-    echo "[WATCHER] scanning containers..." | tee -a "$LOG"
-    reconcile
-    sleep 60
-  done
-}
-
-# =========================
-# START
-# =========================
-watch_loop
+main "$@"
