@@ -1,130 +1,159 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-set -euo pipefail
+set -e
 
 echo "========================================"
-echo "      DuckHomeLab V5 STABLE BASE"
+echo "     DuckHomeLab V5 - SIMPLE MODE"
 echo "========================================"
 
-# -----------------------------
-# INPUTS
-# -----------------------------
-read -rp "DuckDNS domain (ej: midominio.duckdns.org): " DOMAIN
-read -rp "Email Let's Encrypt: " EMAIL
+### -----------------------------
+### CHECK ROOT
+### -----------------------------
+if [ "$EUID" -ne 0 ]; then
+  echo "[ERROR] Ejecuta como root (sudo)."
+  exit 1
+fi
 
-echo ""
-echo "[INFO] Validando entorno..."
+### -----------------------------
+### CHECK DOCKER
+### -----------------------------
+if ! command -v docker &> /dev/null; then
+  echo "[INFO] Docker no encontrado. Instalando..."
+  curl -fsSL https://get.docker.com | bash
+else
+  echo "[OK] Docker ya instalado."
+fi
 
-# -----------------------------
-# VALIDAR IP PUBLICA
-# -----------------------------
-PUBLIC_IP=$(curl -s ifconfig.me || true)
-DNS_IP=$(getent ahosts "$DOMAIN" | awk '{print $1; exit}' || true)
+systemctl enable docker >/dev/null 2>&1 || true
+systemctl start docker
+
+### -----------------------------
+### INPUTS
+### -----------------------------
+read -p "DuckDNS domain (ej: midominio.duckdns.org): " DUCKDNS_DOMAIN
+read -p "Email Let's Encrypt: " EMAIL
+
+### -----------------------------
+### DETECT PUBLIC IP
+### -----------------------------
+PUBLIC_IP=$(curl -s ifconfig.me || curl -s ipinfo.io/ip)
 
 echo "[INFO] Public IP: $PUBLIC_IP"
+
+### -----------------------------
+### VALIDATE DNS
+### -----------------------------
+DNS_IP=$(getent hosts "$DUCKDNS_DOMAIN" | awk '{ print $1 }' || true)
+
 echo "[INFO] DNS IP: $DNS_IP"
 
-if [[ -n "$DNS_IP" && "$DNS_IP" != "$PUBLIC_IP" ]]; then
-  echo "[WARN] DNS no apunta a esta máquina (continuando igual)"
+if [ "$PUBLIC_IP" != "$DNS_IP" ]; then
+  echo "[WARN] DNS no coincide con IP pública"
+  echo "       Puede tardar en propagarse DuckDNS"
 else
   echo "[OK] DNS validado"
 fi
 
-# -----------------------------
-# INSTALL DOCKER CHECK
-# -----------------------------
-if ! command -v docker &>/dev/null; then
-  echo "[INFO] Instalando Docker..."
-  curl -fsSL https://get.docker.com | bash
-fi
+### -----------------------------
+### CREATE NETWORK
+### -----------------------------
+docker network create duck_proxy >/dev/null 2>&1 || true
+echo "[OK] Red duck_proxy lista"
 
-systemctl enable --now docker
+### -----------------------------
+### CORE STACK INSTALL
+### -----------------------------
 
-# -----------------------------
-# DOCKER COMPOSE PLUGIN CHECK
-# -----------------------------
-docker compose version >/dev/null 2>&1 || {
-  echo "[INFO] Instalando docker compose plugin..."
-  apt-get update && apt-get install -y docker-compose-plugin
-}
+echo "[INFO] Instalando CORE STACK..."
 
-# -----------------------------
-# NETWORK
-# -----------------------------
-docker network create duck_proxy 2>/dev/null || true
-
-# -----------------------------
-# DOCKGE
-# -----------------------------
-echo "[INFO] Deploy Dockge..."
+### ---------------- Dockge ----------------
 docker run -d \
   --name dockge \
+  --restart=always \
   -p 5001:5001 \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  -v /opt/dockge:/opt/dockge \
-  --restart unless-stopped \
-  louislam/dockge:latest
+  -v dockge_data:/app/data \
+  louislam/dockge:latest || true
 
-# -----------------------------
-# NGINX PROXY MANAGER
-# -----------------------------
-echo "[INFO] Deploy Nginx Proxy Manager..."
-
+### ---------------- Nginx Proxy Manager ----------------
 docker run -d \
   --name npm \
+  --restart=always \
   --network duck_proxy \
-  -p 80:80 \
   -p 81:81 \
+  -p 80:80 \
   -p 443:443 \
-  -e DB_SQLITE_FILE="/data/database.sqlite" \
-  -v /opt/npm/data:/data \
-  -v /opt/npm/letsencrypt:/etc/letsencrypt \
-  --restart unless-stopped \
-  jc21/nginx-proxy-manager:latest
+  -v npm_data:/data \
+  -v npm_letsencrypt:/etc/letsencrypt \
+  jc21/nginx-proxy-manager:latest || true
 
-# -----------------------------
-# OPTIONALS
-# -----------------------------
+### ---------------- Portainer (CORE FIXED) ----------------
+docker run -d \
+  --name portainer \
+  --restart=always \
+  -p 9000:9000 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v portainer_data:/data \
+  portainer/portainer-ce:latest || true
 
-read -rp "Install Nextcloud? [y/N]: " NC
-if [[ "$NC" == "y" || "$NC" == "Y" ]]; then
+echo "[OK] CORE STACK desplegado"
+
+### -----------------------------
+### OPTIONAL STACKS
+### -----------------------------
+
+echo ""
+read -p "Install Nextcloud? [y/N]: " NEXTCLOUD
+
+if [[ "$NEXTCLOUD" =~ ^[yY]$ ]]; then
   echo "[INFO] Deploy Nextcloud..."
   docker run -d \
     --name nextcloud \
+    --restart=always \
     --network duck_proxy \
+    -p 8080:80 \
     nextcloud:latest
 fi
 
-read -rp "Install WireGuard Easy? [y/N]: " WG
-if [[ "$WG" == "y" || "$WG" == "Y" ]]; then
+read -p "Install WireGuard Easy? [y/N]: " WG
+
+if [[ "$WG" =~ ^[yY]$ ]]; then
   echo "[INFO] Deploy WireGuard..."
   docker run -d \
     --name wireguard \
-    --cap-add=NET_ADMIN \
-    --cap-add=SYS_MODULE \
-    -p 51820:51820/udp \
+    --restart=always \
     -p 51821:51821 \
-    -e PASSWORD="admin" \
-    -v /opt/wireguard:/etc/wireguard \
-    --restart unless-stopped \
-    weejewel/wg-easy
+    -p 51820:51820/udp \
+    weejewel/wg-easy:latest
 fi
 
-# -----------------------------
-# REPORT
-# -----------------------------
+### -----------------------------
+### FINAL REPORT
+### -----------------------------
 
 echo ""
 echo "========================================"
-echo "         DUCKHOMELAB V5 DONE"
+echo "        DUCKHOMELAB V5 COMPLETE"
 echo "========================================"
+
+echo "Domain: $DUCKDNS_DOMAIN"
+echo "Public IP: $PUBLIC_IP"
 echo ""
-echo "Access:"
-echo "- NPM: http://$DOMAIN:81"
+echo "ACCESS:"
+echo "- NPM: http://$PUBLIC_IP:81"
 echo "- Dockge: http://$PUBLIC_IP:5001"
+echo "- Portainer: http://$PUBLIC_IP:9000"
+
+if [[ "$NEXTCLOUD" =~ ^[yY]$ ]]; then
+  echo "- Nextcloud: http://$PUBLIC_IP:8080"
+fi
+
+if [[ "$WG" =~ ^[yY]$ ]]; then
+  echo "- WireGuard: http://$PUBLIC_IP:51821"
+fi
+
 echo ""
 echo "IMPORTANT:"
-echo "- Configure SSL manually in NPM"
-echo "- Add Proxy Hosts manually"
-echo ""
+echo "- Configura SSL manualmente en NPM"
+echo "- Crea Proxy Hosts desde UI"
 echo "========================================"
