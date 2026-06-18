@@ -1,195 +1,226 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# =========================================================
-# DUCKHOMELAB V4.6 - FIXED FLOW EDITION
-# =========================================================
+# =========================
+# DUCKHOMELAB V4.7
+# PRODUCTION HARDENING
+# =========================
 
 BASE_DIR="/opt/duckhomelab"
-CONFIG_FILE="${BASE_DIR}/duckhomelab.conf"
+DOMAIN=""
+EMAIL=""
+PUBLIC_IP=""
+STACKS_DEPLOYED=()
 
-mkdir -p "$BASE_DIR"
-
-# ----------------------------
-# UTILS
-# ----------------------------
+# -------------------------
+# LOGGING
+# -------------------------
 log() { echo -e "[DuckHomeLab] $1"; }
 
-ask() {
-  read -rp "$1" "$2"
+# -------------------------
+# DNS VALIDATION REAL
+# -------------------------
+validate_dns() {
+    DOMAIN="$1"
+
+    log "Validando DNS..."
+
+    PUBLIC_IP=$(curl -s https://api.ipify.org)
+    DNS_IP=$(getent ahosts "$DOMAIN" | awk '{print $1; exit}')
+
+    log "DNS -> $DNS_IP"
+    log "WAN -> $PUBLIC_IP"
+
+    if [[ "$DNS_IP" != "$PUBLIC_IP" ]]; then
+        log "ERROR: DNS no apunta a este servidor"
+        exit 1
+    fi
+
+    log "DNS correcto"
 }
 
-confirm() {
-  read -rp "$1 [Y/n]: " yn
-  [[ "${yn,,}" != "n" ]]
+# -------------------------
+# NETWORK SETUP
+# -------------------------
+init_networks() {
+    log "Creando redes Docker..."
+
+    docker network create proxy >/dev/null 2>&1 || true
+    docker network create internal >/dev/null 2>&1 || true
+
+    log "Redes OK"
 }
 
-# ----------------------------
-# PHASE 0 - REQUIREMENTS
-# ----------------------------
-check_requirements() {
-  log "Ubuntu detectado."
-  log "Docker operativo."
+# -------------------------
+# NPM CORE
+# -------------------------
+deploy_npm() {
+    log "Deploy Nginx Proxy Manager..."
+
+    docker volume create npm_data >/dev/null 2>&1 || true
+
+    docker run -d \
+        --name npm \
+        --restart=always \
+        --network proxy \
+        -p 80:80 \
+        -p 443:443 \
+        -p 81:81 \
+        -v npm_data:/data \
+        jc21/nginx-proxy-manager:latest
+
+    STACKS_DEPLOYED+=("npm")
 }
 
-# ----------------------------
-# PHASE 1 - CORE CONFIG
-# ----------------------------
-phase_core_config() {
+# -------------------------
+# PORTAINER CORE
+# -------------------------
+deploy_portainer() {
+    log "Deploy Portainer (CORE)..."
 
-  echo ""
-  log "=== DUCKHOMELAB V4.6 ==="
+    docker volume create portainer_data >/dev/null 2>&1 || true
 
-  ask "👉 DuckDNS domain: " DOMAIN
-  ask "👉 Email Let's Encrypt: " EMAIL
+    docker run -d \
+        --name portainer \
+        --restart=always \
+        --network proxy \
+        -p 9000:9000 \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v portainer_data:/data \
+        portainer/portainer-ce:latest
 
-  log "Validando DNS..."
-
-  IP_DNS=$(getent hosts "$DOMAIN" | awk '{print $1}' || true)
-  IP_WAN=$(curl -s ifconfig.me || true)
-
-  if [[ -z "$IP_DNS" ]]; then
-    log "❌ DNS no resuelve"
-    exit 1
-  fi
-
-  if [[ "$IP_DNS" != "$IP_WAN" ]]; then
-    log "⚠ DNS no coincide con WAN (puede tardar propagación)"
-  else
-    log "OK DNS correcto"
-  fi
-
-  log "Comprobando puertos 80/443..."
-
-  if ss -tuln | grep -q ":80 "; then
-    log "❌ Puerto 80 ocupado"
-    exit 1
-  fi
-
-  if ss -tuln | grep -q ":443 "; then
-    log "❌ Puerto 443 ocupado"
-    exit 1
-  fi
-
-  docker network create duck_proxy >/dev/null 2>&1 || true
-
-  cat > "$CONFIG_FILE" <<EOF
-DOMAIN=$DOMAIN
-EMAIL=$EMAIL
-EOF
-
-  log "Config guardada en $CONFIG_FILE"
-
-  echo ""
-  log "PHASE 1 COMPLETED"
+    STACKS_DEPLOYED+=("portainer")
 }
 
-# ----------------------------
-# PHASE 2 - OPTIONAL MENU
-# ----------------------------
-phase_optional_menu() {
+# -------------------------
+# NEXTCLOUD
+# -------------------------
+deploy_nextcloud() {
+    log "Deploy Nextcloud + Redis..."
 
-  echo ""
-  log "=== STACK SELECTION ==="
+    docker volume create nc_db >/dev/null 2>&1 || true
+    docker volume create nc_data >/dev/null 2>&1 || true
 
-  NEXTCLOUD=false
-  PORTAINER=true
-  IMMICH=false
-  JELLYFIN=false
-  ADGUARD=false
-  WG=false
-  FAIL2BAN=false
+    docker run -d --name nextcloud-db \
+        --network internal \
+        -e MYSQL_ROOT_PASSWORD=secret \
+        -e MYSQL_DATABASE=nextcloud \
+        mariadb:11 || return 1
 
-  confirm "Instalar Nextcloud?" && NEXTCLOUD=true
-  confirm "Instalar Portainer? (recomendado)" && PORTAINER=true
-  confirm "Instalar Immich Photos?" && IMMICH=true
-  confirm "Instalar Jellyfin?" && JELLYFIN=true
-  confirm "Instalar AdGuard Home?" && ADGUARD=true
-  confirm "Instalar WireGuard Easy?" && WG=true
-  confirm "Instalar Fail2Ban?" && FAIL2BAN=true
+    docker run -d --name nextcloud-redis \
+        --network internal \
+        redis:alpine || return 1
+
+    docker run -d --name nextcloud \
+        --network proxy \
+        -e MYSQL_HOST=nextcloud-db \
+        -e REDIS_HOST=nextcloud-redis \
+        nextcloud:latest || return 1
+
+    STACKS_DEPLOYED+=("nextcloud")
 }
 
-# ----------------------------
-# PHASE 3 - INSTALL CORE STACKS
-# ----------------------------
-install_core() {
+# -------------------------
+# WIREGUARD EASY (UDP)
+# -------------------------
+deploy_wireguard() {
+    log "Deploy WireGuard Easy..."
 
-  log "Deploy Nginx Proxy Manager..."
+    docker run -d \
+        --name wireguard \
+        --cap-add=NET_ADMIN \
+        --cap-add=SYS_MODULE \
+        -e WG_HOST="$DOMAIN" \
+        -p 51820:51820/udp \
+        -p 51821:51821 \
+        weejewel/wg-easy || return 1
 
-  docker compose -f npm/docker-compose.yml up -d
-
-  sleep 10
-
-  log "Nextcloud..."
-  $NEXTCLOUD && docker compose -f nextcloud/docker-compose.yml up -d
-
-  log "Portainer..."
-  $PORTAINER && docker run -d \
-    --name portainer \
-    -p 9000:9000 \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    portainer/portainer-ce:latest
+    STACKS_DEPLOYED+=("wireguard")
 }
 
-# ----------------------------
-# PHASE 4 - OPTIONAL STACKS
-# ----------------------------
-install_optional() {
-
-  $IMMICH && log "Immich (TODO compose)"
-  $JELLYFIN && docker run -d --name jellyfin -p 8096:8096 jellyfin/jellyfin
-  $ADGUARD && docker run -d --name adguard -p 3000:3000 adguard/adguardhome
-  $WG && docker run -d --name wg-easy -p 51821:51821 -p 51820:51820/udp weejewel/wg-easy
-  $FAIL2BAN && log "Fail2Ban requiere host install (skip docker)"
+# -------------------------
+# OPTIONAL STACK FLAGS
+# -------------------------
+select_stacks() {
+    read -p "Nextcloud? [y/N]: " r && [[ "$r" == "y" ]] && NEXTCLOUD=1
+    read -p "WireGuard? [y/N]: " r && [[ "$r" == "y" ]] && WG=1
 }
 
-# ----------------------------
-# REPORT
-# ----------------------------
-final_report() {
+NEXTCLOUD=0
+WG=0
 
-  echo ""
-  log "========================================"
-  log "DUCKHOMELAB V4.6 COMPLETED"
-  log "========================================"
+# -------------------------
+# ROLLBACK ENGINE
+# -------------------------
+rollback() {
+    log "ROLLBACK ACTIVADO"
 
-  echo ""
-  log "🌐 ACCESS URLS:"
-  echo "- NPM: http://$DOMAIN:81"
-  echo "- Nextcloud: https://cloud.$DOMAIN"
-  echo "- Portainer: http://$DOMAIN:9000"
-  echo "- Jellyfin: http://$DOMAIN:8096"
-  echo "- WG-Easy: http://$DOMAIN:51821"
+    for s in "${STACKS_DEPLOYED[@]}"; do
+        docker rm -f "$s" >/dev/null 2>&1 || true
+    done
 
-  echo ""
-  log "✔ INSTALLED STACKS:"
-  $NEXTCLOUD && echo "- Nextcloud"
-  $PORTAINER && echo "- Portainer"
-  $IMMICH && echo "- Immich"
-  $JELLYFIN && echo "- Jellyfin"
-  $ADGUARD && echo "- AdGuard"
-  $WG && echo "- WireGuard"
-  $FAIL2BAN && echo "- Fail2Ban"
-
-  echo ""
-  log "========================================"
+    log "Sistema restaurado"
 }
 
-# ----------------------------
-# MAIN PIPELINE (FIX REAL)
-# ----------------------------
+trap rollback ERR
+
+# -------------------------
+# HEALTH CHECK
+# -------------------------
+health_check() {
+    log "Health check..."
+
+    docker ps --format "table {{.Names}}\t{{.Status}}"
+}
+
+# -------------------------
+# FINAL REPORT
+# -------------------------
+report() {
+    echo ""
+    echo "=================================="
+    echo "   DUCKHOMELAB V4.7 COMPLETE"
+    echo "=================================="
+    echo ""
+    echo "Domain: $DOMAIN"
+    echo "Public IP: $PUBLIC_IP"
+    echo ""
+    echo "STACKS:"
+    for s in "${STACKS_DEPLOYED[@]}"; do
+        echo "- $s"
+    done
+    echo ""
+    echo "ACCESS:"
+    echo "- NPM: http://$DOMAIN:81"
+    echo "- Portainer: http://$DOMAIN:9000"
+    echo ""
+    echo "=================================="
+}
+
+# -------------------------
+# MAIN
+# -------------------------
 main() {
 
-  check_requirements
-  phase_core_config
+    echo "=== DUCKHOMELAB V4.7 ==="
 
-  # 🔥 FIX CRÍTICO: aquí estaba el bug
-  phase_optional_menu
+    read -p "DuckDNS domain: " DOMAIN
+    read -p "Email Let's Encrypt: " EMAIL
 
-  install_core
-  install_optional
+    validate_dns "$DOMAIN"
 
-  final_report
+    init_networks
+
+    deploy_npm
+    deploy_portainer
+
+    select_stacks
+
+    [[ "$NEXTCLOUD" == "1" ]] && deploy_nextcloud
+    [[ "$WG" == "1" ]] && deploy_wireguard
+
+    health_check
+    report
 }
 
 main
