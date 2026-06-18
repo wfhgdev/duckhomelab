@@ -1,8 +1,4 @@
-Aquí tienes el **README.md actualizado listo para copiar**, con el repo real y el instalador correcto (`duckhomelab.sh`).
-
----
-
-# 🦆 DuckHomeLab V4
+# 🦆 DuckHomeLab por William Hernández
 
 **DuckHomeLab** es un instalador en Bash orientado a producción para desplegar un home-lab completo basado en Docker con proxy inverso centralizado, SSL automático y stacks self-hosted.
 

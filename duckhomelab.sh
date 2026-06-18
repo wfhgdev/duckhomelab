@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#**DuckHomeLab** es un instalador en Bash orientado a producción para desplegar un home-lab 
+#completo basado en Docker con proxy inverso centralizado, SSL automático y stacks self-hosted.
+#Desarrollado por William Hernandez
 set -euo pipefail
 
 BASE="/opt/homelab"
