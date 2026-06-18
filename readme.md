@@ -140,7 +140,7 @@ Incluye:
 
 ---
 
-# 🤖 AUTODISCOVERY (Docker → NPM)
+# 🤖 AUTODISCOVERY (Docker → Nginx Proxy Manager)
 
 Servicios publicados automáticamente mediante labels:
 
