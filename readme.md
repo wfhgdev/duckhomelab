@@ -89,7 +89,7 @@ El script `duckhomelab.sh` despliega automáticamente la infraestructura complet
 
 ```bash
 # Descarga y ejecuta el script como root
-sudo bash duckhomelab.sh
+git clone https://github.com/wfhgdev/duckhomelab.git && cd duckhomelab && chmod +x duckhomelab.sh && sudo ./duckhomelab.sh
 ```
 
 El script solicitará tres datos al inicio:
