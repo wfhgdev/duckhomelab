@@ -109,7 +109,7 @@ vpn-net
 # 🚀 Instalación (1 solo comando)
 
 ```bash
-curl -fsSL https://get.docker.com | sudo bash && \
+sudo bash && \
 git clone https://github.com/mi-dominio/duckhomelab.git && \
 cd duckhomelab && \
 chmod +x duckhomelab.sh && \
@@ -125,7 +125,7 @@ DuckHomeLab usa DuckDNS como proveedor por defecto:
 Ejemplo:
 
 ```plaintext
-https://cloud.tudominio.duckdns.org
+https://nube.tudominio.duckdns.org
 ```
 
 Incluye:
@@ -183,7 +183,7 @@ CORE SERVICES
 - Dockge: http://SERVER_IP:5001
 
 APPLICATIONS
-- Nextcloud: https://cloud.xxx.duckdns.org
+- Nextcloud: https://nextcloud.xxx.duckdns.org
 - Jellyfin: https://media.xxx.duckdns.org
 - Immich: https://photos.xxx.duckdns.org
 
