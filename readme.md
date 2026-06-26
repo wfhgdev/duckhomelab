@@ -62,7 +62,7 @@ Todos los servicios están conectados a la red Docker `proxy-network`. Los servi
 | RAM | 8 GB | 16 GB |
 | Disco SO | 40 GB SSD | 60 GB SSD |
 | Disco datos | Según biblioteca de fotos | SSD local |
-| SO | Ubuntu Server 22.04 LTS | Ubuntu Server 24.04 LTS |
+| SO | Ubuntu Server 22.04 LTS | Ubuntu Server 26.04 LTS |
 
 > Si ejecutas solo la infraestructura base (NPM + Portainer + Dockge + DuckDNS) los requisitos se reducen a 2 núcleos y 2 GB RAM.
 

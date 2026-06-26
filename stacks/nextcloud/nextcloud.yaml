@@ -28,8 +28,8 @@ services:
     volumes:
       - nextcloud_db:/var/lib/mysql
     environment:
-      - MARIADB_ROOT_PASSWORD='X@[3YmSdqD$$D' #CambiaEstePasswordRootTanSeguroComoPuedas
-      - MARIADB_PASSWORD='1JsjXBq?1IK' #CambiaEstePasswordDeUsuario
+      - MARIADB_ROOT_PASSWORD='CambiaEstePasswordRootTanSeguroComoPuedas' #CambiaEstePasswordRootTanSeguroComoPuedas
+      - MARIADB_PASSWORD='CambiaEstePasswordDeUsuario' #CambiaEstePasswordDeUsuario
       - MARIADB_DATABASE=nextcloud
       - MARIADB_USER=nextcloud
     networks:
@@ -52,7 +52,7 @@ services:
     volumes:
       - nextcloud_data:/var/www/html
     environment:
-      - MYSQL_PASSWORD='1JsjXBq?1IK' #Cambia este password de Usuario, debe coincidir con MARIADB_PASSWORD
+      - MYSQL_PASSWORD='CambiaEstePasswordDeUsuario' #Cambia este password de Usuario, debe coincidir con MARIADB_PASSWORD
       - MYSQL_DATABASE=nextcloud
       - MYSQL_USER=nextcloud
       - MYSQL_HOST=nextcloud-db
@@ -60,7 +60,7 @@ services:
       # Variables críticas para que funcione detrás de Nginx Proxy Manager sin bucles de redirección:
       - TRUSTED_PROXIES=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
       - OVERWRITEPROTOCOL=https
-      - TZ=America/Bogota #zona horaria
+      - TZ=Europe/Madrid #zona horaria
       #===Rendimiento y Límites de Archivos (Altamente Recomendadas)
       #- PHP_MEMORY_LIMIT:1G #Define la memoria RAM máxima que puede usar PHP. Por defecto son 512M
       #- PHP_UPLOAD_LIMIT:10G #El tamaño máximo de un archivo que puedes subir a la nube. Por defecto son 512M
@@ -87,11 +87,11 @@ services:
       (
       echo 'Esperando a que Nextcloud esté listo para aplicar optimizaciones...';
       sleep 30;
-      php occ config:system:set maintenance_window_start --type=integer --value=7;
-      php occ config:system:set default_phone_region --value='CO';
+      php occ config:system:set maintenance_window_start --type=integer --value=1; #La 1AM (01:00) en UTC equivale a las 3 AM en Madrid
+      php occ config:system:set default_phone_region --value='ES';
       php occ config:system:set default_language --value='es';
-      php occ config:system:set default_locale --value='es_CO';
-      php occ config:system:set logtimezone --value='America/Bogota';
+      php occ config:system:set default_locale --value='es_ES';
+      php occ config:system:set logtimezone --value='Europe/Madrid';
       php occ maintenance:repair --include-expensive;
       echo 'Configurando ID estático del servidor...';
       php occ config:system:set server_id --value='nc34_2026x';
