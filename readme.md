@@ -110,7 +110,7 @@ vpn-net
 
 ```bash
 curl -fsSL https://get.docker.com | sudo bash && \
-git clone https://github.com/wfhgdev/duckhomelab.git && \
+git clone https://github.com/mi-dominio/duckhomelab.git && \
 cd duckhomelab && \
 chmod +x duckhomelab.sh && \
 sudo ./duckhomelab.sh

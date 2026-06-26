@@ -1,0 +1,155 @@
+# ============================================================================
+# Stack: WG-Easy v15 — WireGuard VPN + Panel de administración web
+# Para usar en: Dockge → /opt/stacks/wg-easy/docker-compose.yml
+#
+# Documentación oficial v15: https://wg-easy.github.io/wg-easy/v15.1/
+#
+# CAMBIOS IMPORTANTES EN v15 respecto a versiones anteriores:
+#   - La imagen cambió de 'weejewel/wg-easy' (Docker Hub) a
+#     'ghcr.io/wg-easy/wg-easy:15' (GitHub Container Registry).
+#   - El compose oficial ya NO usa variables de entorno para WG_HOST,
+#     PASSWORD, etc. — ahora la configuración inicial se hace a través
+#     del asistente web (setup wizard) en el primer acceso.
+#   - El panel web (puerto 51821) requiere HTTPS por defecto. Al ponerlo
+#     detrás de NPM via proxy-network, hay que añadir INSECURE=true para
+#     que acepte conexiones HTTP internas desde NPM.
+#   - IPv6 está habilitado por defecto. Para solo IPv4 se usa DISABLE_IPV6=true
+#     y se eliminan los sysctls de IPv6 y la red dual-stack.
+#   - La red interna 'wg' que usa el compose oficial es necesaria para
+#     que WireGuard gestione sus propias IPs de clientes VPN (10.42.42.0/24).
+#     Es diferente a proxy-network: 'wg' es la red de túnel VPN,
+#     'proxy-network' es la red Docker para que NPM llegue al panel web.
+#   - El volumen para configuración ahora se monta como named volume
+#     ('etc_wireguard') en lugar de bind mount directo.
+#   - Se añade '/lib/modules:/lib/modules:ro' para cargar el módulo
+#     del kernel de WireGuard correctamente.
+#
+# ARQUITECTURA DE REDES en este stack:
+#   ┌─────────────────────────────────────────────────────┐
+#   │  Internet                                           │
+#   │    │                                               │
+#   │    ├── Puerto 51820/UDP → WireGuard VPN (clientes) │
+#   │    └── Puerto 443/TCP  → NPM → proxy-network       │
+#   │                                  │                 │
+#   │                           wg-easy:51821            │
+#   │                           (panel web interno)      │
+#   │                                                    │
+#   │  Red 'wg' (Docker interna):                        │
+#   │    wg-easy: 10.42.42.42  ← IP fija del servidor   │
+#   │    clientes VPN: 10.42.42.x                        │
+#   └─────────────────────────────────────────────────────┘
+#
+# PRERREQUISITOS:
+#   1. Abrir el puerto UDP 51820 en el router hacia la IP del servidor.
+#   2. Tener el certificado wildcard *.mi-dominio.duckdns.org ya creado en NPM.
+#   3. Crear el Proxy Host en NPM:
+#      - Dominio  : wg.mi-dominio.duckdns.org
+#      - Scheme   : http   (INSECURE=true permite HTTP interno)
+#      - Host     : wg-easy
+#      - Port     : 51821
+#      - SSL      : wg.tu-dominio.duckdns.org (wildcard existente)
+#      - Force SSL: ✅
+# ============================================================================
+
+services:
+
+  wg-easy:
+    image: ghcr.io/wg-easy/wg-easy:15
+    container_name: wg-easy
+
+    environment:
+      # -----------------------------------------------------------------------
+      # TZ: zona horaria del servidor.
+      # -----------------------------------------------------------------------
+      - TZ=Europe/Madrid
+
+      # -----------------------------------------------------------------------
+      # INSECURE=true: permite que el panel web funcione sobre HTTP.
+      # Es OBLIGATORIO al usar un proxy inverso como NPM, porque la
+      # comunicación interna Docker (NPM → wg-easy) va en HTTP aunque
+      # el usuario final acceda vía HTTPS. Sin esto el panel muestra
+      # un error de certificado o se niega a cargar.
+      # -----------------------------------------------------------------------
+      - INSECURE=true
+
+      # -----------------------------------------------------------------------
+      # DISABLE_IPV6=true: solo IPv4. Deshabilita las reglas de firewall
+      # IPv6 y no asigna IPs IPv6 a los clientes VPN.
+      # Según la doc oficial: "This option can be removed in the future,
+      # as more devices support IPv6."
+      # -----------------------------------------------------------------------
+      - DISABLE_IPV6=true
+
+      # -----------------------------------------------------------------------
+      # PORT: puerto interno del panel web. 51821 es el valor por defecto.
+      # No lo cambiamos para mantener compatibilidad con la documentación.
+      # -----------------------------------------------------------------------
+      - PORT=51821
+
+    volumes:
+      # Configuración persistente de WireGuard (claves, peers, etc.)
+      - etc_wireguard:/etc/wireguard
+      # Módulos del kernel necesarios para WireGuard (solo lectura)
+      - /lib/modules:/lib/modules:ro
+
+    ports:
+      # Puerto VPN: el tráfico WireGuard de los clientes entra por aquí.
+      # DEBE estar abierto en el router (UDP).
+      # El panel web (51821) NO se expone al exterior — va por NPM.
+      - "51820:51820/udp"
+
+    networks:
+      # Red interna de WireGuard: gestiona las IPs de los clientes VPN.
+      # IP fija 10.42.42.42 para el servidor (requerida por wg-easy v15).
+      wg:
+        ipv4_address: 10.42.42.42
+      # Red compartida con NPM para que el proxy pueda llegar al panel web.
+      proxy-network:
+
+    cap_add:
+      # NET_ADMIN: necesario para gestionar interfaces de red y rutas.
+      - NET_ADMIN
+      # SYS_MODULE: necesario para cargar el módulo wireguard del kernel.
+      - SYS_MODULE
+
+    sysctls:
+      # Habilitar reenvío de paquetes IPv4 (imprescindible para VPN).
+      - net.ipv4.ip_forward=1
+      # Requerido por WireGuard para marcar paquetes correctamente.
+      - net.ipv4.conf.all.src_valid_mark=1
+      # IPv6 deshabilitado a nivel de kernel (complementa DISABLE_IPV6=true).
+      - net.ipv6.conf.all.disable_ipv6=1
+
+    restart: unless-stopped
+
+# ============================================================================
+# VOLÚMENES
+# Named volume para persistencia de la configuración de WireGuard.
+# Los datos se guardan en el área gestionada por Docker (/var/lib/docker).
+# Para hacer backup: docker run --rm -v etc_wireguard:/data ...
+# ============================================================================
+volumes:
+  etc_wireguard:
+    name: wg-easy_etc_wireguard
+
+# ============================================================================
+# REDES
+# ============================================================================
+networks:
+
+  # Red interna de WireGuard: solo IPv4 (enable_ipv6: false).
+  # Subred 10.42.42.0/24 para los clientes VPN y el servidor.
+  # Esta red NO es la misma que proxy-network — tiene un propósito
+  # distinto: gestionar el espacio de IPs del túnel VPN.
+  wg:
+    driver: bridge
+    enable_ipv6: false
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.42.42.0/24
+
+  # Red compartida con NPM y el resto de servicios del homelab.
+  # Se declara como externa porque fue creada por el script de instalación.
+  proxy-network:
+    external: true

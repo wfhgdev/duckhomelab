@@ -1,0 +1,112 @@
+# ============================================================================
+# Stack: Nextcloud v34 — crea tu propia plataforma de almacenamiento y colaboración en la nube
+# Para usar en: Dockge → /opt/stacks/immich/docker-compose.yml
+#
+# ============================================================================
+# Crear el Proxy Host en Nginx Proxy Manager tras desplegar:
+#        ===Details===
+#        - Dominio  : nextcloud.tu-dominio.duckdns.org
+#        - Scheme   : http
+#        - Host     : nextcloud-app (nombre del contenedor de Nextcloud)
+#        - Port     : 80
+#        - Cache Assets:          DESACTIVADO
+#        - Block Common Exploits: ACTIVADO
+#        - Websockets Support:    ACTIVADO (Obligatorio)
+#        ===SSL===
+#        - SSL Certificate : *.tu-dominio.duckdns.org (wildcard existente)
+#        - Force SSL       : ACTIVADO
+#        - HTTP/2 Support  : ACTIVADO (Crucial para el rendimiento)
+#        - HSTS Enabled    : ACTIVADO
+#        - HSTS Sub-domains: DESACTIVADO
+
+services:
+  nextcloud-db:
+    image: mariadb:11.8
+    container_name: nextcloud-db
+    restart: always
+    command: --transaction-isolation=READ-COMMITTED --log-bin=binlog --binlog-format=ROW
+    volumes:
+      - nextcloud_db:/var/lib/mysql
+    environment:
+      - MARIADB_ROOT_PASSWORD='X@[3YmSdqD$$D' #CambiaEstePasswordRootTanSeguroComoPuedas
+      - MARIADB_PASSWORD='1JsjXBq?1IK' #CambiaEstePasswordDeUsuario
+      - MARIADB_DATABASE=nextcloud
+      - MARIADB_USER=nextcloud
+    networks:
+      - nextcloud-net
+
+  nextcloud-redis:
+    image: redis:alpine
+    container_name: nextcloud-redis
+    restart: always
+    networks:
+      - nextcloud-net
+
+  nextcloud-app:
+    image: nextcloud:latest # Incluye Apache 2.4 y PHP 8.5 optimizados
+    container_name: nextcloud-app
+    restart: always
+    depends_on:
+      - nextcloud-db
+      - nextcloud-redis
+    volumes:
+      - nextcloud_data:/var/www/html
+    environment:
+      - MYSQL_PASSWORD='1JsjXBq?1IK' #Cambia este password de Usuario, debe coincidir con MARIADB_PASSWORD
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_HOST=nextcloud-db
+      - REDIS_HOST=nextcloud-redis
+      # Variables críticas para que funcione detrás de Nginx Proxy Manager sin bucles de redirección:
+      - TRUSTED_PROXIES=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+      - OVERWRITEPROTOCOL=https
+      - TZ=America/Bogota #zona horaria
+      #===Rendimiento y Límites de Archivos (Altamente Recomendadas)
+      #- PHP_MEMORY_LIMIT:1G #Define la memoria RAM máxima que puede usar PHP. Por defecto son 512M
+      #- PHP_UPLOAD_LIMIT:10G #El tamaño máximo de un archivo que puedes subir a la nube. Por defecto son 512M
+      #===Automatizar el Servidor de Correo (SMTP)
+      #- SMTP_HOST=smtp.gmail.com
+      #- SMTP_PORT=465
+      #- SMTP_SECURE=ssl
+      #- SMTP_AUTHTYPE=LOGIN
+      #- SMTP_NAME=tu-correo@gmail.com
+      #- SMTP_PASSWORD=tu-contraseña-de-aplicacion https://support.google.com/mail/answer/185833?hl=es
+      #- SMTP_FROM_ADDRESS=tu-correo
+      #- SMTP_DOMAIN=gmail.com
+      #===Ajustes del Proxy Inverso y Dominios (Para Nginx Proxy Manager)
+      - NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.mi-dominio.duckdns.org #Una lista separada por espacios con los dominios exactos desde los que vas a acceder
+      - OVERWRITEHOST=nextcloud.mi-dominio.duckdns.org #Fuerza a Nextcloud a escribir los enlaces usando tu dominio externo en lugar de la IP o nombre del contenedor
+      #===Despliegue Automático (Instalación "Desatendida")
+      #- NEXTCLOUD_ADMIN_USER=admin-master
+      #- NEXTCLOUD_ADMIN_PASSWORD=ContraseñaSeguraDeAdmin
+    networks:
+      - nextcloud-net
+      - proxy-network # <-- LA RED DONDE COVIVE TU NGINX PROXY MANAGER
+    command: >
+      bash -c "
+      (
+      echo 'Esperando a que Nextcloud esté listo para aplicar optimizaciones...';
+      sleep 30;
+      php occ config:system:set maintenance_window_start --type=integer --value=7;
+      php occ config:system:set default_phone_region --value='CO';
+      php occ config:system:set default_language --value='es';
+      php occ config:system:set default_locale --value='es_CO';
+      php occ config:system:set logtimezone --value='America/Bogota';
+      php occ maintenance:repair --include-expensive;
+      echo 'Configurando ID estático del servidor...';
+      php occ config:system:set server_id --value='nc34_2026x';
+      echo 'Instalando la app Two-Factor Nextcloud Notification...';
+      php occ app:install twofactor_nextcloud_notification;
+      echo '¡Optimización interna completada con éxito!';
+      ) &
+      exec apache2-foreground
+      "
+volumes:
+  nextcloud_db:
+  nextcloud_data:
+
+networks:
+  nextcloud-net:
+    driver: bridge
+  proxy-network:
+    external: true # Indica a Dockge que use la red existente de tu NPM externo

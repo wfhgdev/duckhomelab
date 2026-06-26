@@ -1,159 +1,192 @@
 #!/bin/bash
+###############################################################################
+# DuckHomeLab - Entorno Docker automatizado
+###############################################################################
 
-set -e
+set -euo pipefail
 
-echo "========================================"
-echo "     DuckHomeLab V5 - SIMPLE MODE"
-echo "========================================"
+# ----------------------------
+# MODO DE EJECUCIÓN
+# ----------------------------
+# PROD = sin puertos en apps internas (solo NPM)
+# DEV  = expone puertos para debug
+DOCKER_MODE="${DOCKER_MODE:-prod}"
 
-### -----------------------------
-### CHECK ROOT
-### -----------------------------
-if [ "$EUID" -ne 0 ]; then
-  echo "[ERROR] Ejecuta como root (sudo)."
-  exit 1
+# ----------------------------
+# COLORES
+# ----------------------------
+COLOR_VERDE='\033[0;32m'
+COLOR_AMARILLO='\033[1;33m'
+COLOR_ROJO='\033[0;31m'
+COLOR_AZUL='\033[0;34m'
+COLOR_RESET='\033[0m'
+
+info(){ echo -e "${COLOR_AZUL}[INFO]${COLOR_RESET} $1"; }
+ok(){ echo -e "${COLOR_VERDE}[OK]${COLOR_RESET} $1"; }
+warn(){ echo -e "${COLOR_AMARILLO}[WARN]${COLOR_RESET} $1"; }
+error(){ echo -e "${COLOR_ROJO}[ERROR]${COLOR_RESET} $1" >&2; }
+
+# ----------------------------
+# VARIABLES
+# ----------------------------
+DIR_BASE="/opt/docker-services"
+DIR_STACKS="/opt/stacks"
+NETWORK="proxy-network"
+COMPOSE_FILE="${DIR_BASE}/docker-compose.yml"
+
+# ----------------------------
+# ROOT CHECK
+# ----------------------------
+[[ $EUID -ne 0 ]] && { error "Ejecuta como root"; exit 1; }
+
+# ----------------------------
+# INPUTS
+# ----------------------------
+read -rp "Subdominio DuckDNS: " SUBDOMAIN
+read -rp "Token DuckDNS: " TOKEN
+read -rp "Zona horaria (Europe/Madrid): " TZ
+TZ="${TZ:-Europe/Madrid}"
+
+# ----------------------------
+# UPDATE + DEPENDENCIAS
+# ----------------------------
+info "Actualizando sistema..."
+apt-get update -y
+apt-get install -y curl git ca-certificates gnupg
+
+# ----------------------------
+# DOCKER INSTALL
+# ----------------------------
+if ! command -v docker &>/dev/null; then
+    info "Instalando Docker..."
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+
+    echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+    $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+    > /etc/apt/sources.list.d/docker.list
+
+    apt-get update -y
+    apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    systemctl enable --now docker
 fi
 
-### -----------------------------
-### CHECK DOCKER
-### -----------------------------
-if ! command -v docker &> /dev/null; then
-  echo "[INFO] Docker no encontrado. Instalando..."
-  curl -fsSL https://get.docker.com | bash
+# ----------------------------
+# ENTORNO
+# ----------------------------
+info "Preparando entorno..."
+mkdir -p "$DIR_BASE" "$DIR_STACKS"
+
+docker network inspect "$NETWORK" >/dev/null 2>&1 || \
+docker network create "$NETWORK"
+
+# ----------------------------
+# COMPOSE
+# ----------------------------
+info "Generando docker-compose..."
+
+DOCKGE_PORT_BLOCK=""
+if [[ "$DOCKER_MODE" == "dev" ]]; then
+    DOCKGE_PORT_BLOCK='ports:
+      - "5001:5001"'
+    warn "Modo DEV: Dockge expuesto en puerto 5001"
 else
-  echo "[OK] Docker ya instalado."
+    DOCKGE_PORT_BLOCK="# sin puerto (modo proxy NPM)"
 fi
 
-systemctl enable docker >/dev/null 2>&1 || true
-systemctl start docker
+cat > "$COMPOSE_FILE" <<EOF
+services:
 
-### -----------------------------
-### INPUTS
-### -----------------------------
-read -p "DuckDNS domain (ej: midominio.duckdns.org): " DUCKDNS_DOMAIN
-read -p "Email Let's Encrypt: " EMAIL
+  duckdns:
+    image: lscr.io/linuxserver/duckdns:latest
+    container_name: duckdns
+    environment:
+      - SUBDOMAINS=$SUBDOMAIN
+      - TOKEN=$TOKEN
+      - TZ=$TZ
+    restart: unless-stopped
+    networks: [$NETWORK]
 
-### -----------------------------
-### DETECT PUBLIC IP
-### -----------------------------
-PUBLIC_IP=$(curl -s ifconfig.me || curl -s ipinfo.io/ip)
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: npm
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"
+    volumes:
+      - $DIR_BASE/npm/data:/data
+      - $DIR_BASE/npm/letsencrypt:/etc/letsencrypt
+    restart: unless-stopped
+    networks: [$NETWORK]
 
-echo "[INFO] Public IP: $PUBLIC_IP"
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - $DIR_BASE/portainer:/data
+    restart: unless-stopped
+    networks: [$NETWORK]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-### -----------------------------
-### VALIDATE DNS
-### -----------------------------
-DNS_IP=$(getent hosts "$DUCKDNS_DOMAIN" | awk '{ print $1 }' || true)
+  dockge:
+    image: louislam/dockge:latest
+    container_name: dockge
+    environment:
+      - DOCKGE_STACKS_DIR=$DIR_STACKS
+$DOCKGE_PORT_BLOCK
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - $DIR_BASE/dockge:/app/data
+      - $DIR_STACKS:$DIR_STACKS
+    restart: unless-stopped
+    networks: [$NETWORK]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-echo "[INFO] DNS IP: $DNS_IP"
+networks:
+  $NETWORK:
+    external: true
+EOF
 
-if [ "$PUBLIC_IP" != "$DNS_IP" ]; then
-  echo "[WARN] DNS no coincide con IP pública"
-  echo "       Puede tardar en propagarse DuckDNS"
-else
-  echo "[OK] DNS validado"
-fi
+# ----------------------------
+# DEPLOY
+# ----------------------------
+info "Desplegando servicios..."
+cd "$DIR_BASE"
+docker compose up -d --pull always
 
-### -----------------------------
-### CREATE NETWORK
-### -----------------------------
-docker network create duck_proxy >/dev/null 2>&1 || true
-echo "[OK] Red duck_proxy lista"
+# ----------------------------
+# HEALTH CHECK
+# ----------------------------
+info "Verificando servicios..."
 
-### -----------------------------
-### CORE STACK INSTALL
-### -----------------------------
+sleep 5
 
-echo "[INFO] Instalando CORE STACK..."
+curl -fs http://localhost:81 >/dev/null && ok "NPM OK" || warn "NPM FAIL"
+curl -fs http://localhost:9000 >/dev/null && warn "Portainer directo no expuesto (OK si usas NPM)"
+curl -fs http://localhost:5001 >/dev/null && ok "Dockge OK (DEV mode activo)" || warn "Dockge solo vía proxy (PROD mode)"
 
-### ---------------- Dockge ----------------
-docker run -d \
-  --name dockge \
-  --restart=always \
-  -p 5001:5001 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v dockge_data:/app/data \
-  louislam/dockge:latest || true
-
-### ---------------- Nginx Proxy Manager ----------------
-docker run -d \
-  --name npm \
-  --restart=always \
-  --network duck_proxy \
-  -p 81:81 \
-  -p 80:80 \
-  -p 443:443 \
-  -v npm_data:/data \
-  -v npm_letsencrypt:/etc/letsencrypt \
-  jc21/nginx-proxy-manager:latest || true
-
-### ---------------- Portainer (CORE FIXED) ----------------
-docker run -d \
-  --name portainer \
-  --restart=always \
-  -p 9000:9000 \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v portainer_data:/data \
-  portainer/portainer-ce:latest || true
-
-echo "[OK] CORE STACK desplegado"
-
-### -----------------------------
-### OPTIONAL STACKS
-### -----------------------------
-
+# ----------------------------
+# RESUMEN
+# ----------------------------
 echo ""
-read -p "Install Nextcloud? [y/N]: " NEXTCLOUD
-
-if [[ "$NEXTCLOUD" =~ ^[yY]$ ]]; then
-  echo "[INFO] Deploy Nextcloud..."
-  docker run -d \
-    --name nextcloud \
-    --restart=always \
-    --network duck_proxy \
-    -p 8080:80 \
-    nextcloud:latest
-fi
-
-read -p "Install WireGuard Easy? [y/N]: " WG
-
-if [[ "$WG" =~ ^[yY]$ ]]; then
-  echo "[INFO] Deploy WireGuard..."
-  docker run -d \
-    --name wireguard \
-    --restart=always \
-    -p 51821:51821 \
-    -p 51820:51820/udp \
-    weejewel/wg-easy:latest
-fi
-
-### -----------------------------
-### FINAL REPORT
-### -----------------------------
-
+ok "INSTALACIÓN COMPLETADA"
+echo "Modo: $DOCKER_MODE"
+echo "NPM: http://localhost:81"
+echo "DuckDNS: https://${SUBDOMAIN}.duckdns.org"
 echo ""
-echo "========================================"
-echo "        DUCKHOMELAB V5 COMPLETE"
-echo "========================================"
-
-echo "Domain: $DUCKDNS_DOMAIN"
-echo "Public IP: $PUBLIC_IP"
-echo ""
-echo "ACCESS:"
-echo "- NPM: http://$PUBLIC_IP:81"
-echo "- Dockge: http://$PUBLIC_IP:5001"
-echo "- Portainer: http://$PUBLIC_IP:9000"
-
-if [[ "$NEXTCLOUD" =~ ^[yY]$ ]]; then
-  echo "- Nextcloud: http://$PUBLIC_IP:8080"
-fi
-
-if [[ "$WG" =~ ^[yY]$ ]]; then
-  echo "- WireGuard: http://$PUBLIC_IP:51821"
-fi
-
-echo ""
-echo "IMPORTANT:"
-echo "- Configura SSL manualmente en NPM"
-echo "- Crea Proxy Hosts desde UI"
-echo "========================================"
+echo "IMPORTANTE:"
+echo "- Configura Proxy Hosts en NPM"
+echo "- Portainer -> http://portainer:9000"
+echo "- Dockge -> http://dockge:5001"
