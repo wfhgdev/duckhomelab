@@ -108,7 +108,6 @@ mkdir -p "$DIR_BASE/portainer"
 mkdir -p "$DIR_BASE/dockge"
 
 # Nota crítica: Fail2Ban fallará al arrancar si los archivos .log declarados no existen en el host.
-# Forzamos su creación inicial segura mediante 'touch'.
 touch "$DIR_BASE/npm/data/logs/manager.log"
 touch "$DIR_BASE/npm/data/logs/default-host_access.log"
 touch "$DIR_BASE/npm/data/logs/fallback_access.log"
@@ -183,7 +182,6 @@ ok "Fail2Ban configurado y reiniciado con éxito."
 # ----------------------------
 # GESTIÓN Y AJUSTES DE PUERTOS (PROD vs DEV)
 # ----------------------------
-# Reajuste del stack basándonos en las directrices de optimización
 if [[ "$DOCKER_MODE" == "dev" ]]; then
     NPM_PORT_81='- "81:81"'
     PORTAINER_PORT_BLOCK='ports:
@@ -192,19 +190,20 @@ if [[ "$DOCKER_MODE" == "dev" ]]; then
       - "5001:5001"'
     warn "Modo DESARROLLO (DEV) activo: Todos los puertos administrativos se exponen al host."
 else
-    # En modo PROD bindeamos el puerto 81 estrictamente a localhost para neutralizar la manipulación de iptables de Docker
     NPM_PORT_81='- "127.0.0.1:81:81"'
     PORTAINER_PORT_BLOCK="# Sin puerto mapeado (Tráfico optimizado HTTP interno por proxy-network)"
     DOCKGE_PORT_BLOCK="# Sin puerto mapeado (Acceso exclusivo a través del proxy inverso)"
 fi
 
 # ----------------------------
-# GENERACIÓN DE DOCKER COMPOSE (ESTÁNDAR ACTUAL SIN DIRECTIVA 'VERSION')
+# GENERACIÓN DE DOCKER COMPOSE CON RESPALDO VERSIONADO (IDEMPOTENTE)
 # ----------------------------
-# Copia de seguridad si ya existía un archivo compose previo
+# Mejora: Se incluye marca de tiempo para evitar sobreescribir respaldos anteriores
 if [[ -f "$COMPOSE_FILE" ]]; then
-    warn "Detectado un docker-compose.yml existente. Creando respaldo en ${COMPOSE_FILE}.bak"
-    cp "$COMPOSE_FILE" "${COMPOSE_FILE}.bak"
+    FECHA_RESPALDO=$(date +%Y%m%d_%H%M%S)
+    FICHERO_BAK="${COMPOSE_FILE}.bak_${FECHA_RESPALDO}"
+    warn "Detectado un docker-compose.yml existente. Guardando copia histórica en: $FICHERO_BAK"
+    cp "$COMPOSE_FILE" "$FICHERO_BAK"
 fi
 
 info "Escribiendo especificación limpia de Docker Compose..."
@@ -289,14 +288,12 @@ docker compose up -d --pull always
 info "Ejecutando diagnóstico de salud del stack..."
 sleep 6
 
-# Verificación de Nginx Proxy Manager (vía puerto web expuesto en el host)
 if curl -fs http://localhost:80 >/dev/null 2>&1 || [ $? -eq 404 ]; then
     ok "NPM Core: Operativo y respondiendo."
 else
     warn "NPM Core: No responde en el puerto 80. Revisa logs ('docker logs npm')."
 fi
 
-# Diagnóstico nativo para las aplicaciones internas sin relying en mapeos externos del host
 check_container_status() {
     local container_name=$1
     if [[ "$(docker inspect -f '{{.State.Running}}' "$container_name" 2>/dev/null)" == "true" ]]; then
