@@ -13,12 +13,6 @@
 #        - HTTP/2 Support  : ACTIVADO
 #        - HSTS Enabled    : ACTIVADO
 #        - HSTS Sub-domains: DESACTIVADO
-#
-#   4. El primer usuario en registrarse se convierte en administrador.
-#      Accede a https://fotos.mi-dominio.duckdns.org y regístrate.
-#
-#   5. El primer arranque tarda 3-5 minutos: Immich descarga los modelos
-#      de machine learning (~1-2 GB) automáticamente. Es normal.
 
 services:
   stirling-pdf:
