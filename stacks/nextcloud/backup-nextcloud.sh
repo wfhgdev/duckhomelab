@@ -4,9 +4,11 @@
 USUARIO_REAL=${SUDO_USER:-$USER}
 HOME_USUARIO="/home/$USUARIO_REAL"
 
-# 2. Parámetros internos de Nextcloud y nombres de archivos
+# 2. Nombres de los contenedores
 CONTAINER_APP="nextcloud-app"
 CONTAINER_DB="nextcloud-db"
+
+# 3. Parámetros de tiempo y archivos
 FECHA=$(date +%Y%m%d_%H%M%S)
 RESPALDO_DATA="nextcloud_datos_$FECHA.tar"
 RESPALDO_SQL="nextcloud_base_datos_$FECHA.sql"
@@ -22,12 +24,30 @@ echo "    GESTOR DE RESPALDOS AUTOMÁTICO DE NEXTCLOUD          "
 echo "========================================================="
 echo "👤 Usuario Ubuntu detectado: $USUARIO_REAL"
 echo "🏠 Ruta Home asignada:       $HOME_USUARIO"
-echo "--------------------------------------------------------..."
+
+# 🛠️ EXTRACCIÓN AUTOMÁTICA DE CREDENCIALES DE LA BD
+# Usamos 'tr -d \r' porque la salida de Docker a veces incluye retornos de carro invisibles
+echo "--> Detectando credenciales de la Base de Datos..."
+DB_USER=$(docker exec $CONTAINER_APP printenv MYSQL_USER | tr -d '\r')
+DB_PASS=$(docker exec $CONTAINER_APP printenv MYSQL_PASSWORD | tr -d '\r')
+DB_NAME=$(docker exec $CONTAINER_APP printenv MYSQL_DATABASE | tr -d '\r')
+
+# Validar si el contenedor está apagado o no se pudieron leer las variables
+if [ -z "$DB_USER" ] || [ -z "$DB_PASS" ] || [ -z "$DB_NAME" ]; then
+    echo "❌ Error crítico: No se pudieron leer las credenciales desde $CONTAINER_APP."
+    echo "👉 Asegúrate de que los contenedores de Nextcloud estén encendidos ('up')."
+    exit 1
+fi
+echo "    ✅ Base de Datos:  $DB_NAME"
+echo "    ✅ Usuario DB:     $DB_USER"
+echo "    ✅ Contraseña DB:  🔐 [Detectada con éxito]"
+
+echo "---------------------------------------------------------"
 echo "Selecciona el destino del respaldo:"
 echo "1) En tu carpeta Home ($HOME_USUARIO)"
 echo "2) En otra ruta local personalizada (Ej: /media/mi_disco)"
 echo "3) Enviar directo a carpeta compartida de Windows (LAN)"
-echo "--------------------------------------------------------..."
+echo "---------------------------------------------------------"
 read -p "Selecciona una opción [1-3]: " OPCION
 
 case $OPCION in
@@ -50,35 +70,35 @@ case $OPCION in
         read -p "  -> Nombre del recurso compartido (Folder): " SMB_SHARE
         read -p "  -> Usuario de Windows: " SMB_USER
         read -s -p "  -> Contraseña de Windows (no se mostrará al escribir): " SMB_PASS
-        echo "" # Salto de línea necesario después del password oculto
+        echo "" 
         echo "========================================================="
 
-        # Validar que no se dejen campos vacíos
         if [ -z "$SMB_SERVER" ] || [ -z "$SMB_SHARE" ] || [ -z "$SMB_USER" ] || [ -z "$SMB_PASS" ]; then
             echo "❌ Error: Todos los datos de la red Windows son obligatorios."
             exit 1
         fi
 
-        echo "--> Intentando conectar con //$SMB_SERVER/$SMB_SHARE..."
-        
-        # Verificar que cifs-utils esté instalado
+        # Verificación e instalación de cifs-utils
         if ! command -v mount.cifs &> /dev/null; then
-            echo "❌ Error: 'cifs-utils' no está instalado."
-            echo "👉 Ejecuta primero en tu terminal: sudo apt install cifs-utils"
-            exit 1
+            echo "--> 🛠️ 'cifs-utils' no está instalado. Instalándolo automáticamente..."
+            apt update && apt install -y cifs-utils
+            if [ $? -ne 0 ]; then
+                echo "❌ Error crítico: No se pudo instalar 'cifs-utils'."
+                exit 1
+            fi
+            echo "✅ 'cifs-utils' se instaló correctamente."
         fi
 
-        # Crear el punto de montaje temporal
+        echo "--> Intentando conectar con //$SMB_SERVER/$SMB_SHARE..."
+
         if [ ! -d "$PUNTO_MONTAJE" ]; then
             sudo mkdir -p "$PUNTO_MONTAJE"
         fi
 
-        # Montar en caliente mapeando los permisos con tus IDs locales
         sudo mount -t cifs -o username="$SMB_USER",password="$SMB_PASS",uid=$(id -u $USUARIO_REAL),gid=$(id -g $USUARIO_REAL),iocharset=utf8 "//$SMB_SERVER/$SMB_SHARE" "$PUNTO_MONTAJE"
         
         if [ $? -ne 0 ]; then
             echo "❌ Error crítico: No se pudo montar la carpeta de Windows."
-            echo "Asegúrate de que la carpeta esté bien compartida en Windows y que las credenciales sean correctas."
             sudo rmdir "$PUNTO_MONTAJE" 2>/dev/null
             exit 1
         fi
@@ -103,9 +123,9 @@ echo "--> 1/4 Activando modo mantenimiento en Nextcloud..."
 docker exec --user www-data $CONTAINER_APP php occ maintenance:mode --on
 
 echo "---------------------------------------------------------"
-# 2. Exportar Base de Datos
+# 2. Exportar Base de Datos usando las variables auto-detectadas
 echo "--> 2/4 Exportando estructura de Base de Datos MariaDB..."
-docker exec -i $CONTAINER_DB mysqldump -unextcloud -p'1JsjXBq?1IK' nextcloud > "$DESTINO/$RESPALDO_SQL"
+docker exec -i $CONTAINER_DB mysqldump -u"$DB_USER" -p"$DB_PASS" "$DB_NAME" > "$DESTINO/$RESPALDO_SQL"
 if [ $? -eq 0 ]; then
     echo "   ✅ Base de datos volcada correctamente."
 else
@@ -134,9 +154,12 @@ if [ "$APLICAR_CHOWN" = true ]; then
     sudo chown $USUARIO_REAL:$USUARIO_REAL "$DESTINO/$RESPALDO_DATA"
 fi
 
+# Calcular el peso de los archivos generados antes de desmontar
+PESO_SQL=$(du -sh "$DESTINO/$RESPALDO_SQL" 2>/dev/null | awk '{print $1}')
+PESO_DATA=$(du -sh "$DESTINO/$RESPALDO_DATA" 2>/dev/null | awk '{print $1}')
+
 # 6. Desmontar carpeta de Windows si fue utilizada
 if [ "$NECESITA_DESMONTAR" = true ]; then
-    echo "---------------------------------------------------------"
     echo "--> Limpiando entorno: Desmontando almacenamiento de Windows..."
     sudo umount "$PUNTO_MONTAJE"
     sudo rmdir "$PUNTO_MONTAJE"
@@ -145,14 +168,16 @@ fi
 
 echo "========================================================="
 echo "  ¡RESPALDO FINALIZADO CON ÉXITO!                        "
+echo "========================================================="
 if [ "$NECESITA_DESMONTAR" = true ]; then
     echo "  Los archivos fueron enviados directo a tu PC Windows:  "
-    echo "  📂 Recurso: //$SMB_SERVER/$SMB_SHARE/"
-    echo "  📄 -> $RESPALDO_SQL"
-    echo "  📄 -> $RESPALDO_DATA"
+    echo "  📂 Recurso LAN: //$SMB_SERVER/$SMB_SHARE/"
 else
-    echo "  Ubicación de los archivos locales:                     "
-    echo "  📄 BD: $DESTINO/$RESPALDO_SQL                          "
-    echo "  📄 Archivos: $DESTINO/$RESPALDO_DATA                   "
+    echo "  Ubicación de los archivos locales del servidor:        "
+    echo "  📂 Carpeta:     $DESTINO"
 fi
+echo "---------------------------------------------------------"
+echo "  📦 DETALLE DE ARCHIVOS Y PESO:"
+echo "  📄 Base de Datos:  $RESPALDO_SQL ($PESO_SQL)"
+echo "  📄 Datos y Config: $RESPALDO_DATA ($PESO_DATA)"
 echo "========================================================="
