@@ -1,0 +1,42 @@
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:stable # <-- Corregido a :stable según documentación oficial
+    container_name: n8n
+    restart: always
+    environment:
+      - TZ=Europe/Madrid
+      - GENERIC_TIMEZONE=Europe/Madrid
+      - N8N_HOST=n8n.wfhgdev.duckdns.org
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=https://n8n.mi-domino.duckdns.org/
+      # Clave de cifrado única para tus credenciales guardadas en la base de datos local.
+      - N8N_ENCRYPTION_KEY=wlh_n8n_secure_key_2026! 
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - proxy-network
+volumes:
+  n8n_data:
+    name: n8n_data
+networks:
+  proxy-network:
+    external: true
+
+# Configuración en Nginx Proxy Manager (NPM)
+# Cuando vayas a crear el Proxy Host en la interfaz web de tu Nginx Proxy Manager para darle salida, 
+# configúra el host con estos parámetros:
+#        ===Details===
+#        - Dominio  : n8n.mi-dominio.duckdns.org
+#        - Scheme   : http
+#        - Host     : n8n
+#        - Port     : 5678
+#        - Cache Assets:          DESACTIVADO
+#        - Block Common Exploits: ACTIVADO
+#        - Websockets Support:    ACTIVADO
+#        ===SSL===
+#        - SSL Certificate : *.tu-dominio.duckdns.org (wildcard existente)
+#        - Force SSL       : ACTIVADO
+#        - HTTP/2 Support  : ACTIVADO
+#        - HSTS Enabled    : ACTIVADO
+#        - HSTS Sub-domains: DESACTIVADO
