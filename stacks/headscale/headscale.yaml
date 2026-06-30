@@ -1,0 +1,33 @@
+services:
+  headscale:
+    image: ghcr.io/juanfont/headscale:stable
+    container_name: headscale
+    restart: always
+    command: headscale serve
+    volumes:
+      - ./config:/etc/headscale
+      - ./data:/var/lib/headscale
+    networks:
+      - proxy-network
+
+networks:
+  proxy-network:
+    external: true
+
+# Configuración en Nginx Proxy Manager (NPM)
+# Cuando vayas a crear el Proxy Host en la interfaz web de tu Nginx Proxy Manager para darle salida, 
+# configúra el host con estos parámetros:
+#        ===Details===
+#        - Dominio  : headscale.mi-dominio.duckdns.org
+#        - Scheme   : http
+#        - Host     : headscale
+#        - Port     : 8080
+#        - Cache Assets:          DESACTIVADO
+#        - Block Common Exploits: ACTIVADO
+#        - Websockets Support:    DESACTIVADO
+#        ===SSL===
+#        - SSL Certificate : *.tu-dominio.duckdns.org (wildcard existente)
+#        - Force SSL       : ACTIVADO
+#        - HTTP/2 Support  : DESACTIVADO
+#        - HSTS Enabled    : ACTIVADO
+#        - HSTS Sub-domains: DESACTIVADO
