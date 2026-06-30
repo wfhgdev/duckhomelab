@@ -1,24 +1,36 @@
 services:
   n8n:
-    image: docker.n8n.io/n8nio/n8n:stable # <-- Corregido a :stable según documentación oficial
+    image: docker.n8n.io/n8nio/n8n:stable
     container_name: n8n
     restart: always
     environment:
+      # Zona Horaria
       - TZ=Europe/Madrid
       - GENERIC_TIMEZONE=Europe/Madrid
-      - N8N_HOST=n8n.wfhgdev.duckdns.org
+      
+      # Identidad del Servidor (Reemplazan las variables del .env oficial)
+      - N8N_HOST=n8n.mi-dominio.duckdns.org
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
-      - WEBHOOK_URL=https://n8n.mi-domino.duckdns.org/
-      # Clave de cifrado única para tus credenciales guardadas en la base de datos local.
-      - N8N_ENCRYPTION_KEY=wlh_n8n_secure_key_2026! 
+      - WEBHOOK_URL=https://n8n.mi-dominio.duckdns.org/
+      
+      # Seguridad y Cifrado (Recomendado por la guía oficial)
+      - N8N_ENCRYPTION_KEY=wlh_n8n_secure_key_2026!
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      
+      # 🧹 Poda Automática de Datos (Historial de 7 días para optimizar SQLite)
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+      - EXECUTIONS_DATA_PRUNE_TIMEOUT=3600
     volumes:
       - n8n_data:/home/node/.n8n
     networks:
       - proxy-network
+
 volumes:
   n8n_data:
     name: n8n_data
+
 networks:
   proxy-network:
     external: true
