@@ -32,7 +32,7 @@ Router doméstico (puertos 80 y 443 abiertos)
     ▼
 Nginx Proxy Manager ──── Certificado wildcard *.tudominio.duckdns.org
     │
-    ├── portainer.tudominio.duckdns.org  →  Portainer   (9443 https)
+    ├── portainer.tudominio.duckdns.org  →  Portainer   (9000 http)
     ├── dockge.tudominio.duckdns.org     →  Dockge      (5001 http)
     ├── wg.tudominio.duckdns.org         →  WG-Easy     (51821 http)
     ├── fotos.tudominio.duckdns.org      →  Immich      (2283 http)
@@ -478,9 +478,7 @@ CONTAINER_DB="nextcloud-db"
 RUTA_VOLUMEN_DATA="/var/lib/docker/volumes/nextcloud_nextcloud_data/_data"
 
 ```bash
-# Uso
 sudo bash backup-nextcloud.sh
-# Genera: /home/willi/nextcloud_data_backup.tar
 ```
 
 ### Backup general de todos los servicios
