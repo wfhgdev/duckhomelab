@@ -438,29 +438,49 @@ sudo tail -f /var/log/fail2ban.log
 
 ## Backups
 
-### Script de backup de Nextcloud
+# Nextcloud Docker Smart Backup Script 🚀
 
-El script `backup-nextcloud.sh` realiza una copia de seguridad de los datos de Nextcloud de forma segura:
+Un script inteligente en Bash diseñado para realizar copias de seguridad selectivas y automatizadas de instancias de **Nextcloud** desplegadas en entornos Docker (Docker Compose). 
 
-1. Activa el **modo mantenimiento** en Nextcloud para evitar corrupción de datos durante el backup.
-2. Empaqueta todos los archivos del volumen en un `.tar` sin comprimir.
-3. Desactiva el modo mantenimiento para devolver el servicio a los usuarios.
-4. Corrige los permisos del archivo para descargarlo via SFTP/WinSCP.
+A diferencia de los respaldos tradicionales que empaquetan todo el volumen (incluyendo el código nativo de Nextcloud y dependencias pesadas), este script extrae **únicamente** lo que realmente importa: la base de datos MariaDB y los datos/configuraciones de los usuarios.
+
+---
+
+## ✨ Características Principales
+
+- **Detección Automática de Usuario:** Identifica dinámicamente tu cuenta de usuario de Ubuntu (`$SUDO_USER`) para gestionar rutas y permisos sin necesidad de hardcodear nombres.
+- **Extracción de Credenciales "Zero-Config":** El script lee de forma segura las variables de entorno (`MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_DATABASE`) directamente desde el contenedor en ejecución. No tienes que escribir contraseñas en el código del script.
+- **Menú Interactivo de Destinos:** Permite elegir de forma dinámica entre tres opciones de almacenamiento:
+  1. Carpeta `Home` del usuario actual de manera automática.
+  2. Una ruta local o disco externo personalizado (Ej: `/media/mi_disco`).
+  3. **Envío directo en caliente a una carpeta compartida de Windows (LAN/Samba)**.
+- **Instalación de Dependencias Inteligente:** Si eliges exportar a Windows y tu servidor no tiene las herramientas de red necesarias, el script detecta la ausencia de `cifs-utils` y las instala de forma desatendida.
+- **Seguridad de Datos:** Activa automáticamente el modo mantenimiento (`maintenance:mode --on`) en Nextcloud al iniciar la copia para congelar la base de datos y evitar la corrupción de archivos en tránsito, devolviendo la nube a producción inmediatamente al terminar.
+- **Reporte Detallado:** Calcula e imprime en pantalla el nombre y el peso exacto de los archivos `.tar` y `.sql` generados con marcas de tiempo detalladas.
+
+---
+
+## 📦 Estructura del Respaldo generado
+
+El script genera dos archivos independientes con formato `AAAAMMDD_HHMMSS` para mantener un histórico ordenado:
+1. `nextcloud_base_datos_[timestamp].sql`: Volcado limpio estructurado de la base de datos MariaDB.
+2. `nextcloud_datos_[timestamp].tar`: Empaquetado comprimido que incluye exclusivamente los directorios `data/` (archivos de usuarios) y `config/` (parámetros del sistema).
+
+---
+
+## 🛠️ Requisitos Previos
+
+El script asume por defecto los nombres de pila estándar para los contenedores. Si los tuyos varían, puedes editarlos directamente en las variables de cabecera del script:
+
+```bash
+CONTAINER_APP="nextcloud-app"
+CONTAINER_DB="nextcloud-db"
+RUTA_VOLUMEN_DATA="/var/lib/docker/volumes/nextcloud_nextcloud_data/_data"
 
 ```bash
 # Uso
 sudo bash backup-nextcloud.sh
 # Genera: /home/willi/nextcloud_data_backup.tar
-```
-
-Editar las variables al inicio del script según tu entorno:
-
-```bash
-CONTAINER="nextcloud-app"       # nombre del contenedor de Nextcloud
-DESTINO="/home/willi"           # directorio donde se guarda el backup
-NOMBRE_ARCHIVO="nextcloud_data_backup.tar"
-RUTA_VOLUMEN="/var/lib/docker/volumes/nextcloud_nextcloud_data/_data"
-USUARIO="willi"                 # usuario Ubuntu para corregir permisos
 ```
 
 ### Backup general de todos los servicios
