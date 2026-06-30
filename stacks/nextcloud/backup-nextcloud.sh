@@ -20,7 +20,7 @@ NECESITA_DESMONTAR=false
 APLICAR_CHOWN=true
 
 echo "========================================================="
-echo "    GESTOR DE RESPALDOS AUTOMÁTICO DE NEXTCLOUD          "
+echo "   GESTOR DE RESPALDOS AUTOMÁTICO DE NEXTCLOUD DOCKER          "
 echo "========================================================="
 echo "👤 Usuario Ubuntu detectado: $USUARIO_REAL"
 echo "🏠 Ruta Home asignada:       $HOME_USUARIO"
@@ -46,7 +46,7 @@ echo "---------------------------------------------------------"
 echo "Selecciona el destino del respaldo:"
 echo "1) En tu carpeta Home ($HOME_USUARIO)"
 echo "2) En otra ruta local personalizada (Ej: /media/mi_disco)"
-echo "3) Enviar directo a carpeta compartida de Windows (LAN)"
+echo "3) Enviar directo a carpeta compartida de Windows (SBM/CIFS)"
 echo "---------------------------------------------------------"
 read -p "Selecciona una opción [1-3]: " OPCION
 
@@ -55,6 +55,7 @@ case $OPCION in
         DESTINO="$HOME_USUARIO"
         ;;
     2)
+        #Comando para listar todas las particiones de los discos: sudo fdisk -l
         read -p "Introduce la ruta absoluta del directorio destino: " RUTA_PERSONALIZADA
         if [ ! -d "$RUTA_PERSONALIZADA" ]; then
             echo "❌ Error: La ruta introducida no existe."
