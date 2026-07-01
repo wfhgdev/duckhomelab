@@ -7,17 +7,14 @@ services:
       # Zona Horaria
       - TZ=Europe/Madrid
       - GENERIC_TIMEZONE=Europe/Madrid
-      
       # Identidad del Servidor (Reemplazan las variables del .env oficial)
       - N8N_HOST=n8n.mi-dominio.duckdns.org
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
       - WEBHOOK_URL=https://n8n.mi-dominio.duckdns.org/
-      
       # Seguridad y Cifrado (Recomendado por la guía oficial)
       - N8N_ENCRYPTION_KEY=wlh_n8n_secure_key_2026!
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-      
       # Poda Automática de Datos (Historial de 7 días para optimizar SQLite)
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=168
