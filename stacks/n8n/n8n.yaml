@@ -18,7 +18,7 @@ services:
       - N8N_ENCRYPTION_KEY=wlh_n8n_secure_key_2026!
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
       
-      # 🧹 Poda Automática de Datos (Historial de 7 días para optimizar SQLite)
+      # Poda Automática de Datos (Historial de 7 días para optimizar SQLite)
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=168
       - EXECUTIONS_DATA_PRUNE_TIMEOUT=3600
