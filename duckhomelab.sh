@@ -27,13 +27,13 @@ error(){ echo -e "${COLOR_ROJO}[ERROR]${COLOR_RESET} $1" >&2; }
 # ----------------------------
 mostrar_banner() {
     cat << "EOF"
-  _____             _    _    _                      _           _     
- |  __ \           | |  | |  | |                    | |         | |    
- | |  | |_   _  ___| | _| |__| | ___  _ __ ___   ___| |     __ _| |__  
- | |  | | | | |/ __| |/ /  __  |/ _ \| '_ ` _ \ / _ \ |    / _` | '_ \ 
- | |__| | |_| | (__|   <| |  | | (_) | | | | | |  __/ |___| (_| | |_) |
- |_____/ \__,_|\___|_|\_\_|  |_|\___/|_| |_| |_|\___|______\__,_|_.__/ 
-  by William Hernandez 2026                                                                     
+ ______                    __        ____  ____                            __          __        
+|_   _ `.                  [  |  _  |_   ||   _|                          [  |        [  |       
+  | | `. \ __   _   .---.  | | / ]    | |__| |    .--.   _ .--..--.  .---.   | |  ,--.   | |.--.   
+  | |  | |[  | | | / /'`\] | '' <     |  __  |  / .'`\ \[ `.-. .-. |/ /__\\  | | `'_\ :  | '/'`\ \ 
+ _| |_.' / | \_/ |,| \__.  | |`\ \   _| |  | |_ | \__. | | | | | | || \__.,  | | // | |, | \__/ | 
+|______.'  '.__.'_/'.___.'[__|  \_]|____||____| '.__.' [___||__||__]'.__.'[___]\'-;__/[__;.__.'  
+                                                                                                 
 EOF
 }
 
@@ -57,9 +57,10 @@ mostrar_banner
 # PARÁMETROS DE ENTRADA
 # ----------------------------
 info "Configuración inicial del entorno:"
-read -rp "Subdominio DuckDNS (ej: mi-homelab): " SUBDOMAIN
+read -rp "Subdominio DuckDNS (digite solo el subdomnio ej: mi-dominio): " SUBDOMAIN
 read -rp "Token de DuckDNS: " TOKEN
-read -rp "Zona horaria (presiona Enter para Europe/Madrid): " TZ
+info "Zona horaria del servidor (Ej: America/Bogota)."
+read -rp "Zona horaria (presiona Enter para elegir Europe/Madrid): " TZ
 TZ="${TZ:-Europe/Madrid}"
 echo ""
 
